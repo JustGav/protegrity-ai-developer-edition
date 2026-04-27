@@ -142,6 +142,23 @@ def protegrity_request(method, url, retries=MAX_RETRIES, **kwargs):
                 method, url, headers=req_headers, **kwargs
             )
 
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                delay = (
+                    float(retry_after)
+                    if retry_after
+                    else RETRY_DELAY * (2 ** (attempt - 1))
+                )
+                logger.warning(
+                    "429 rate-limited on attempt %d/%d to %s "
+                    "— backing off %.1fs",
+                    attempt, retries, url, delay,
+                )
+                if attempt < retries:
+                    time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+
             if resp.status_code == 401:
                 logger.warning(
                     f"401 Unauthorized on attempt {attempt}/{retries} to {url} — "
@@ -149,7 +166,7 @@ def protegrity_request(method, url, retries=MAX_RETRIES, **kwargs):
                 )
                 invalidate_session()
                 if attempt < retries:
-                    time.sleep(RETRY_DELAY * attempt)
+                    time.sleep(RETRY_DELAY * (2 ** (attempt - 1)))
                     continue
                 resp.raise_for_status()
 
@@ -163,7 +180,7 @@ def protegrity_request(method, url, retries=MAX_RETRIES, **kwargs):
             )
             invalidate_session()
             if attempt < retries:
-                time.sleep(RETRY_DELAY * attempt)
+                time.sleep(RETRY_DELAY * (2 ** (attempt - 1)))
 
     raise last_exception
 
