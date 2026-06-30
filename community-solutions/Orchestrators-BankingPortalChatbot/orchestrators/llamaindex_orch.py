@@ -13,8 +13,10 @@ from typing import Dict, List, Optional
 
 from orchestrators.base import BaseOrchestrator, PipelineResult
 from common.protegrity_gates import register_context_tokens
+from config.local_llm_config import get_ollama_base_url
 from config.orchestration_config import (
-    get_model, KB_ENABLED,
+    get_model_name,
+    KB_ENABLED,
     LLM_PROVIDER,
 )
 
@@ -31,36 +33,53 @@ SYSTEM_PROMPT = (
 
 def _get_llama_llm():
     """Return a LlamaIndex LLM instance based on the configured provider."""
-    provider = os.environ.get("LLM_PROVIDER", LLM_PROVIDER)
-    model = get_model(provider)
+    from config.llm_api_keys import get_api_key, sync_keys_to_env
 
-    if provider == "openai":
-        from llama_index.llms.openai import OpenAI as LlamaOpenAI
-        return LlamaOpenAI(
-            model=model,
-            api_key=os.environ.get("OPENAI_API_KEY", ""),
-            temperature=0.3,
-            max_tokens=1024,
-        )
-    elif provider == "anthropic":
-        from llama_index.llms.anthropic import Anthropic as LlamaAnthropic
-        return LlamaAnthropic(
-            model=model,
-            api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
-            max_tokens=1024,
-        )
-    elif provider == "groq":
-        # Groq via OpenAI-compatible endpoint
+    sync_keys_to_env()
+    provider = os.environ.get("LLM_PROVIDER", LLM_PROVIDER)
+    model = os.environ.get("LLM_MODEL") or get_model_name(provider)
+
+    if provider == "ollama":
         from llama_index.llms.openai_like import OpenAILike
+
         return OpenAILike(
             model=model,
-            api_key=os.environ.get("GROQ_API_KEY", ""),
-            api_base="https://api.groq.com/openai/v1",
+            api_key="ollama",
+            api_base=f"{get_ollama_base_url()}/v1",
             temperature=0.3,
-            max_tokens=1024,
+            max_tokens=4096,
+            is_chat_model=True,
+            additional_kwargs={"think": False},
         )
-    else:
-        raise ValueError(f"Unsupported LLM provider for LlamaIndex: {provider}")
+    if provider == "openai":
+        from llama_index.llms.openai import OpenAI as LlamaOpenAI
+
+        return LlamaOpenAI(
+            model=model,
+            api_key=get_api_key("openai"),
+            temperature=0.3,
+            max_tokens=4096,
+        )
+    if provider == "anthropic":
+        from llama_index.llms.anthropic import Anthropic as LlamaAnthropic
+
+        return LlamaAnthropic(
+            model=model,
+            api_key=get_api_key("anthropic"),
+            max_tokens=4096,
+        )
+    if provider == "grok":
+        from llama_index.llms.openai_like import OpenAILike
+
+        return OpenAILike(
+            model=model,
+            api_key=get_api_key("grok"),
+            api_base="https://api.x.ai/v1",
+            temperature=0.3,
+            max_tokens=4096,
+            is_chat_model=True,
+        )
+    raise ValueError(f"Unsupported LLM provider for LlamaIndex: {provider}")
 
 
 class LlamaIndexOrchestrator(BaseOrchestrator):

@@ -24,7 +24,7 @@ def test_config_exports():
         get_model, get_model_name,
         RISK_THRESHOLD, GUARDRAIL_RISK_THRESHOLD,
         PROTEGRITY_USER, KB_ENABLED,
-        OPENAI_API_KEY, ANTHROPIC_API_KEY, GROQ_API_KEY,
+        OLLAMA_BASE_URL, OLLAMA_CPU_MODEL,
     )
     assert RISK_THRESHOLD == GUARDRAIL_RISK_THRESHOLD
     assert isinstance(PROTEGRITY_USER, str)
@@ -32,10 +32,11 @@ def test_config_exports():
 
 
 def test_get_model_defaults():
-    """Verify get_model_name returns the default for the current provider."""
-    from config.orchestration_config import get_model_name, DEFAULT_MODELS, LLM_PROVIDER
-    # get_model_name() takes no arguments — it reads the global LLM_PROVIDER
-    assert get_model_name() == DEFAULT_MODELS[LLM_PROVIDER]
+    """Verify get_model_name returns the active Ollama model."""
+    from config.local_llm_config import resolve_active_ollama_model
+    from config.orchestration_config import get_model_name
+
+    assert get_model_name() == resolve_active_ollama_model()
 
 
 # ── Test Gate1Result / Gate2Result dataclasses ────────────────────────
@@ -187,3 +188,33 @@ def test_factory_llamaindex():
         assert orch.name == "LlamaIndex"
     except ImportError:
         pytest.skip("llama-index-core not installed")
+
+
+def test_resolve_active_ollama_model_cpu_default(monkeypatch):
+    import config.local_llm_config as llm_cfg
+
+    monkeypatch.delenv("OLLAMA_ACTIVE_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_GPU_ENABLED", "false")
+    monkeypatch.setenv("OLLAMA_CPU_MODEL", "qwen3.5:0.8b")
+    llm_cfg.reset_ollama_url_cache()
+    assert llm_cfg.resolve_active_ollama_model() == "qwen3.5:0.8b"
+
+
+def test_resolve_active_ollama_model_gpu_when_enabled(monkeypatch):
+    import config.local_llm_config as llm_cfg
+
+    monkeypatch.delenv("OLLAMA_ACTIVE_MODEL", raising=False)
+    monkeypatch.setenv("OLLAMA_GPU_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_GPU_MODEL", "qwen3.5:4b")
+    llm_cfg.reset_ollama_url_cache()
+    assert llm_cfg.resolve_active_ollama_model() == "qwen3.5:4b"
+
+
+def test_resolve_active_ollama_model_active_override(monkeypatch):
+    import config.local_llm_config as llm_cfg
+
+    monkeypatch.setenv("OLLAMA_ACTIVE_MODEL", "qwen3.5:0.8b")
+    monkeypatch.setenv("OLLAMA_GPU_ENABLED", "true")
+    monkeypatch.setenv("OLLAMA_GPU_MODEL", "qwen3.5:4b")
+    llm_cfg.reset_ollama_url_cache()
+    assert llm_cfg.resolve_active_ollama_model() == "qwen3.5:0.8b"

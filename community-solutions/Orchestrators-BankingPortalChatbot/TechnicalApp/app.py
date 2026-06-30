@@ -3,16 +3,36 @@ from __future__ import annotations
 import os, json, logging, time, hashlib
 from pathlib import Path
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from config.local_llm_config import resolve_active_ollama_model
+from config.orchestration_config import (
+    DEFAULT_MODELS,
+    LLM_PROVIDERS,
+    LLM_PROVIDER_LABELS,
+    ORCHESTRATOR,
+    LLM_PROVIDER,
+)
+from config.llm_api_keys import (
+    CLOUD_PROVIDERS,
+    get_keys_status,
+    init_api_keys,
+    set_api_key,
+    sync_keys_to_env,
+)
 from services.banking_service import get_banking_service
 from services.protegrity_guard import get_guard, register_tokens_from_context, _strip_pii_tags
 from services.conversation_history import ConversationHistory
 
-app = Flask(__name__, template_folder=str(Path(__file__).resolve().parent / "templates"))
+APP_DIR = Path(__file__).resolve().parent
+app = Flask(
+    __name__,
+    template_folder=str(APP_DIR / "templates"),
+    static_folder=str(APP_DIR / "static"),
+)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "technical-portal-demo-secret-key-2026")
 
 _config = {
-    "orchestrator": os.environ.get("ORCHESTRATOR", "direct"),
-    "llm_provider": os.environ.get("LLM_PROVIDER", "openai"),
+    "orchestrator": ORCHESTRATOR,
+    "llm_provider": LLM_PROVIDER,
     "llm_model": os.environ.get("LLM_MODEL", ""),
     "risk_threshold": float(os.environ.get("RISK_THRESHOLD", "0.7")),
     "guardrail_enabled": os.environ.get("GUARDRAIL_ENABLED", "true").lower() not in ("false", "0", "no", "off"),
@@ -25,11 +45,13 @@ _config = {
     "kg_enabled": False,
 }
 
-DEFAULT_MODELS = {
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4-20250514",
-    "groq": "llama-3.1-70b-versatile",
-}
+DEFAULT_MODELS = dict(DEFAULT_MODELS)
+if "ollama" not in DEFAULT_MODELS:
+    DEFAULT_MODELS["ollama"] = resolve_active_ollama_model()
+else:
+    DEFAULT_MODELS["ollama"] = resolve_active_ollama_model()
+
+init_api_keys()
 
 service = get_banking_service()
 guard = get_guard()
@@ -102,7 +124,7 @@ ORCHESTRATOR_INFO = {
             "Purpose-built for RAG — ChromaDB vector search over pre-tokenized documents.",
             "Semantic similarity finds relevant customer data even across tokenized fields.",
             "Protegrity tokens in the vector index guarantee zero PII exposure at the embedding layer.",
-            "Native LLM adapters (OpenAI, Anthropic, Groq) with clean Protegrity integration.",
+            "Native LLM adapters (OpenAI, Anthropic, Grok) with clean Protegrity integration.",
             "Best when semantic search quality matters — retrieval over protected document collections.",
         ],
         "data_sources": {"kb": True, "rag": True, "kg": False},
@@ -116,7 +138,7 @@ log = logging.getLogger("TechnicalApp")
 def _get_model() -> str:
     if _config["llm_model"]:
         return _config["llm_model"]
-    return DEFAULT_MODELS.get(_config["llm_provider"], "gpt-4o-mini")
+    return DEFAULT_MODELS.get(_config["llm_provider"], resolve_active_ollama_model())
 
 
 def _history_filepath(session_key: str) -> Path:
@@ -170,6 +192,7 @@ def _call_orchestrated(user_message: str, customer_id: str, protected_context: s
         os.environ["LLM_PROVIDER"] = provider
         if model:
             os.environ["LLM_MODEL"] = model
+        sync_keys_to_env()
         from orchestrators import ask
         result = ask(user_message, customer_id=customer_id, protected_context=protected_context,
                      conversation_history=conversation_history)
@@ -181,8 +204,11 @@ def _call_orchestrated(user_message: str, customer_id: str, protected_context: s
 
 
 def get_llm_response(user_message: str, customer_id: str) -> dict:
+    from services.pipeline_emitter import SOURCE_TECHNICAL, PipelineRunEmitter
+
     trace = []
     t0 = time.time()
+    emitter = PipelineRunEmitter(SOURCE_TECHNICAL, customer_id, user_message)
 
     # Gate 1
     t_gate1 = time.time()
@@ -217,13 +243,26 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
         gate1_result = _PassThrough()
         trace.append({"step": "Gate 1 (Bypassed)", "duration_ms": 0, "risk_score": 0.0, "accepted": True, "pii_elements": 0})
 
+    emitter.gate1(
+        original=user_message,
+        protected=getattr(gate1_result, "transformed_text", user_message),
+        duration_ms=trace[-1].get("duration_ms", 0),
+        risk_score=getattr(gate1_result, "risk_score", 0.0),
+        accepted=getattr(gate1_result, "risk_accepted", True),
+        pii_elements=len(getattr(gate1_result, "elements_found", [])),
+        elements_found=[e.get("entity_type", "unknown") for e in getattr(gate1_result, "elements_found", [])],
+        explanation=getattr(gate1_result, "metadata", {}).get("explanation", ""),
+    )
+
     if not gate1_result.risk_accepted:
         blocked_msg = (
             f"⚠️ Message blocked by security guardrail. "
             f"Risk score: {gate1_result.risk_score} (guardrail threshold: {_config['risk_threshold']}). "
             f"Please rephrase your question."
         )
-        return {"response": blocked_msg, "trace": trace, "config": _get_safe_config(), "total_ms": round((time.time() - t0) * 1000)}
+        total_ms = round((time.time() - t0) * 1000)
+        emitter.complete(blocked=True, total_ms=total_ms, response=blocked_msg)
+        return {"response": blocked_msg, "trace": trace, "config": _get_safe_config(), "total_ms": total_ms}
 
     protected_message = gate1_result.transformed_text
 
@@ -235,10 +274,14 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
         if kb_file.exists():
             protected_context = kb_file.read_text().strip()
             trace.append({"step": "KB File Retrieval", "duration_ms": round((time.time() - t_kb) * 1000), "file": kb_file.name, "chars": len(protected_context)})
+            emitter.kb_retrieval({"duration_ms": round((time.time() - t_kb) * 1000), "file": kb_file.name, "chars": len(protected_context)})
         else:
-            trace.append({"step": "KB File Retrieval", "duration_ms": round((time.time() - t_kb) * 1000), "error": f"Not found: {customer_id}.txt"})
+            kb_miss = {"duration_ms": round((time.time() - t_kb) * 1000), "error": f"Not found: {customer_id}.txt"}
+            trace.append({"step": "KB File Retrieval", **kb_miss})
+            emitter.kb_retrieval(kb_miss)
     else:
         trace.append({"step": "KB File (Disabled)", "duration_ms": 0})
+        emitter.kb_retrieval({"duration_ms": 0, "disabled": True})
 
     # RAG
     rag_context = ""
@@ -250,11 +293,15 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
             rag_chunks = [f"[RAG hit: {r['metadata'].get('customer_id','?')}, dist={r.get('distance',0):.3f}]\n{r['text'][:500]}" for r in rag_results]
             rag_context = "\n\n".join(rag_chunks)
             trace.append({"step": "RAG (ChromaDB)", "duration_ms": round((time.time() - t_rag) * 1000), "results": len(rag_results), "context_chars": len(rag_context)})
+            emitter.rag({"duration_ms": round((time.time() - t_rag) * 1000), "results": len(rag_results), "context_chars": len(rag_context)})
         except Exception as e:
             log.warning("RAG failed: %s", e)
-            trace.append({"step": "RAG (ChromaDB)", "duration_ms": round((time.time() - t_rag) * 1000), "error": str(e)})
+            rag_err = {"duration_ms": round((time.time() - t_rag) * 1000), "error": str(e)}
+            trace.append({"step": "RAG (ChromaDB)", **rag_err})
+            emitter.rag(rag_err)
     else:
         trace.append({"step": "RAG (Disabled)", "duration_ms": 0})
+        emitter.rag({"duration_ms": 0, "disabled": True})
 
     # Knowledge Graph
     kg_context = ""
@@ -284,13 +331,19 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
                             kg_parts.append(f"    {iid} | {item.get('category','')} | ${item.get('amount','')} | {item.get('merchant','')}")
                 kg_context = "\n".join(kg_parts)
                 trace.append({"step": "Knowledge Graph", "duration_ms": round((time.time() - t_kg) * 1000), "graph_nodes": G.number_of_nodes(), "graph_edges": G.number_of_edges(), "context_chars": len(kg_context)})
+                emitter.knowledge_graph({"duration_ms": round((time.time() - t_kg) * 1000), "graph_nodes": G.number_of_nodes(), "graph_edges": G.number_of_edges(), "context_chars": len(kg_context)})
             else:
-                trace.append({"step": "Knowledge Graph", "duration_ms": round((time.time() - t_kg) * 1000), "error": f"{customer_id} not in graph"})
+                kg_miss = {"duration_ms": round((time.time() - t_kg) * 1000), "error": f"{customer_id} not in graph"}
+                trace.append({"step": "Knowledge Graph", **kg_miss})
+                emitter.knowledge_graph(kg_miss)
         except Exception as e:
             log.warning("KG failed: %s", e)
-            trace.append({"step": "Knowledge Graph", "duration_ms": round((time.time() - t_kg) * 1000), "error": str(e)})
+            kg_err = {"duration_ms": round((time.time() - t_kg) * 1000), "error": str(e)}
+            trace.append({"step": "Knowledge Graph", **kg_err})
+            emitter.knowledge_graph(kg_err)
     else:
         trace.append({"step": "Knowledge Graph (Disabled)", "duration_ms": 0})
+        emitter.knowledge_graph({"duration_ms": 0, "disabled": True})
 
     # Combine context
     context_parts = []
@@ -320,6 +373,14 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
         "context_sources": [s for s in ["KB" if protected_context else None, "RAG" if rag_context else None, "KG" if kg_context else None] if s],
         "sub_trace": orch_result.get("trace", []), "response_preview": raw_response[:300],
     })
+    emitter.orchestrator({
+        "duration_ms": round((time.time() - t_orch) * 1000),
+        "orchestrator": _config["orchestrator"],
+        "provider": _config["llm_provider"],
+        "model": _get_model(),
+        "sub_trace": orch_result.get("trace", []),
+        "response_preview": raw_response[:500],
+    })
     history.add_assistant_message(raw_response)
     _save_history(f"{session.get('username', 'anon')}_{customer_id}")
 
@@ -330,9 +391,19 @@ def get_llm_response(user_message: str, customer_id: str) -> dict:
     trace.append({
         "step": f"Gate 2 (Unprotect as '{protegrity_user}')", "duration_ms": round((time.time() - t_gate2) * 1000),
         "protegrity_user": protegrity_user, "raw_preview": raw_response[:200], "final_preview": final_response[:200],
+        "raw_response": raw_response,
+        "final_response": final_response,
     })
+    emitter.gate2(
+        raw_response=raw_response,
+        final_response=final_response,
+        duration_ms=round((time.time() - t_gate2) * 1000),
+        protegrity_user=protegrity_user,
+    )
 
-    return {"response": final_response, "trace": trace, "config": _get_safe_config(), "total_ms": round((time.time() - t0) * 1000)}
+    total_ms = round((time.time() - t0) * 1000)
+    emitter.complete(blocked=False, total_ms=total_ms, response=final_response)
+    return {"response": final_response, "trace": trace, "config": _get_safe_config(), "total_ms": total_ms}
 
 
 def _get_safe_config() -> dict:
@@ -393,7 +464,9 @@ def dashboard():
     orch_info = ORCHESTRATOR_INFO.get(_config["orchestrator"], ORCHESTRATOR_INFO["direct"])
     return render_template("dashboard.html", username=session["username"], role=session["role"],
         config=_get_safe_config(), customer_ids=sorted(customer_ids), orchestrators=available_orchestrators,
-        llm_providers=["openai", "anthropic", "groq"], protegrity_users=["superuser", "Marketing", "Finance", "Support"],
+        llm_providers=list(LLM_PROVIDERS), llm_provider_labels=LLM_PROVIDER_LABELS,
+        cloud_providers=list(CLOUD_PROVIDERS), llm_keys=get_keys_status(),
+        protegrity_users=["superuser", "Marketing", "Finance", "Support"],
         locked_orchestrator=locked_orch, orch_info=orch_info)
 
 
@@ -423,7 +496,7 @@ def api_update_config():
         if locked_orch is None or data["orchestrator"] == locked_orch:
             _config["orchestrator"] = data["orchestrator"]
             updated.append("orchestrator")
-    if "llm_provider" in data and data["llm_provider"] in ("openai", "anthropic", "groq"):
+    if "llm_provider" in data and data["llm_provider"] in LLM_PROVIDERS:
         new_provider = data["llm_provider"]
         if new_provider != _config["llm_provider"]:
             # Clear model when provider changes so auto-default kicks in
@@ -464,6 +537,27 @@ def api_update_config():
 
     log.info("Config updated by %s: %s", session.get("username"), updated)
     return jsonify({"status": "ok", "updated": updated, "config": _get_safe_config()})
+
+
+@app.route("/tech/api/llm-keys", methods=["GET"])
+def api_get_llm_keys():
+    if "username" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    return jsonify({"keys": get_keys_status()})
+
+
+@app.route("/tech/api/llm-keys", methods=["POST"])
+def api_update_llm_keys():
+    if "username" not in session:
+        return jsonify({"error": "Not authenticated"}), 401
+    data = request.get_json() or {}
+    updated = []
+    for provider in CLOUD_PROVIDERS:
+        if provider in data:
+            set_api_key(provider, data[provider] or "")
+            updated.append(provider)
+    log.info("LLM API keys updated by %s: %s", session.get("username"), updated)
+    return jsonify({"status": "ok", "updated": updated, "keys": get_keys_status()})
 
 
 @app.route("/tech/api/chat", methods=["POST"])

@@ -100,17 +100,17 @@ bash scripts/setup_protegrity.sh
 
 | Component | How it's installed |
 |---|---|
-| Protegrity Docker containers | Clones [protegrity-developer-edition](https://github.com/Protegrity-Developer-Edition/protegrity-developer-edition), runs `docker compose up -d` |
+| Protegrity Docker containers | Clones [protegrity-developer-edition](https://github.com/Protegrity-Developer-Edition/protegrity-developer-edition), runs `docker compose up -d` in `data-discovery/` then `semantic-guardrail/` |
 | Python SDK | `pip install protegrity-developer-python` (falls back to cloning [protegrity-developer-python](https://github.com/Protegrity-Developer-Edition/protegrity-developer-python) and building from source) |
 
 **Manual installation** (if you prefer):
 
 ```bash
-# 1. Docker containers
+# 1. Docker containers (classification + guardrail stacks)
 git clone https://github.com/Protegrity-Developer-Edition/protegrity-developer-edition.git
-cd protegrity-developer-edition
-docker compose up -d
-cd ..
+cd protegrity-developer-edition/data-discovery && docker compose up -d
+cd ../semantic-guardrail && docker compose up -d
+cd ../..
 
 # 2. Python SDK
 pip install protegrity-developer-python

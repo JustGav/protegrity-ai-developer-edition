@@ -6,7 +6,7 @@ Usage (library):
     result = ask("What is my balance?", customer_id="CUST-100000")
 
 Usage (CLI):
-    ORCHESTRATOR=langgraph LLM_PROVIDER=openai python -m orchestrators
+    ORCHESTRATOR=langgraph LLM_PROVIDER=ollama python -m orchestrators
 """
 
 from __future__ import annotations

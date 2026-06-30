@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Observer — Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/protegrity-theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/observer.css') }}">
+</head>
+<body class="observer-login-page">
+    <div class="login-card">
+        <div class="login-brand">
+            <img src="{{ url_for('static', filename='images/protegrity-logo.svg') }}" alt="Protegrity">
+        </div>
+        <h1>Pipeline Observer</h1>
+        <p class="subtitle">Realtime chat pipeline monitoring</p>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" placeholder="admin" autofocus>
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" placeholder="••••••••">
+            <button type="submit">Sign In</button>
+        </form>
+        <p class="hint">Uses the same credentials as TechnicalApp (<code>config/users.json</code>).</p>
+    </div>
+</body>
+</html>

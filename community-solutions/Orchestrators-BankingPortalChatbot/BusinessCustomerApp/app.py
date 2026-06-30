@@ -82,6 +82,8 @@ def _unprotect_text(text: str) -> str:
 # ── Chat Histories ───────────────────────────────────────────────────
 
 _chat_histories: dict[str, list] = {}
+_trace_logs: dict[str, list] = {}
+MAX_TRACE_LOGS = 30
 
 
 def _history_key(customer_id: str) -> str:
@@ -105,6 +107,12 @@ def _save_history(customer_id: str):
     fp = HISTORY_DIR / f"{key}.json"
     with open(fp, "w") as f:
         json.dump(_chat_histories.get(key, []), f)
+
+
+def _append_trace_log(customer_id: str, entry: dict):
+    logs = _trace_logs.setdefault(customer_id, [])
+    logs.insert(0, entry)
+    del logs[MAX_TRACE_LOGS:]
 
 
 # ── Auth helpers ─────────────────────────────────────────────────────
@@ -220,6 +228,8 @@ def api_summary():
             "name":  _unprotect_text(customer.get("name", "")),
             "email": _unprotect_text(customer.get("email", "")),
             "phone": _unprotect_text(customer.get("phone", "")),
+            "address": _unprotect_text(customer.get("address", "")),
+            "dob": _unprotect_text(customer.get("dob", "")),
             "accounts": accounts,
             "credit_cards": cards,
             "contracts": contracts,
@@ -253,7 +263,12 @@ def api_chat():
 
     customer_id = session["customer_id"]
     t0 = time.time()
+    trace_id = int(t0 * 1000)
     trace = []
+
+    from services.pipeline_emitter import SOURCE_BUSINESS, PipelineRunEmitter
+
+    emitter = PipelineRunEmitter(SOURCE_BUSINESS, customer_id, user_message)
 
     try:
         # ── Gate 1: Protect input ────────────────────────────────
@@ -270,29 +285,89 @@ def api_chat():
                 "risk_score": getattr(gate1, "risk_score", 0),
                 "accepted": getattr(gate1, "risk_accepted", True),
                 "pii_elements": len(getattr(gate1, "elements_found", [])),
+                "elements_found": [
+                    e.get("entity_type", "unknown")
+                    for e in getattr(gate1, "elements_found", [])
+                ],
+                "original": user_message,
+                "protected": getattr(gate1, "transformed_text", user_message),
             }
+        )
+
+        emitter.gate1(
+            original=user_message,
+            protected=getattr(gate1, "transformed_text", user_message),
+            duration_ms=round((time.time() - t_g1) * 1000),
+            risk_score=getattr(gate1, "risk_score", 0),
+            accepted=getattr(gate1, "risk_accepted", True),
+            pii_elements=len(getattr(gate1, "elements_found", [])),
+            elements_found=[
+                e.get("entity_type", "unknown")
+                for e in getattr(gate1, "elements_found", [])
+            ],
         )
 
         if not getattr(gate1, "risk_accepted", True):
             explanation = getattr(gate1, "metadata", {}).get(
                 "explanation", "Blocked by semantic guardrail"
             )
+            total_ms = round((time.time() - t0) * 1000)
+            blocked_response = f"🚫 {explanation}"
+            emitter.complete(blocked=True, total_ms=total_ms, response=blocked_response)
+            _append_trace_log(
+                customer_id,
+                {
+                    "id": trace_id,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "user_message": user_message,
+                    "response_preview": f"Blocked: {explanation}",
+                    "blocked": True,
+                    "duration_ms": total_ms,
+                    "trace": trace,
+                },
+            )
             return jsonify(
                 {
                     "response": f"🚫 {explanation}",
                     "blocked": True,
                     "trace": trace,
-                    "duration_ms": round((time.time() - t0) * 1000),
+                    "trace_id": trace_id,
+                    "duration_ms": total_ms,
                 }
             )
 
         protected_message = getattr(gate1, "transformed_text", user_message)
 
         # ── Load KB context (pre-tokenized) ──────────────────────
+        t_kb = time.time()
         kb_file = KB_DIR / f"{customer_id}.txt"
         protected_context = ""
         if kb_file.exists():
             protected_context = kb_file.read_text().strip()
+            trace.append(
+                {
+                    "step": "KB File Retrieval",
+                    "duration_ms": round((time.time() - t_kb) * 1000),
+                    "file": kb_file.name,
+                    "chars": len(protected_context),
+                    "preview": protected_context[:400],
+                }
+            )
+            emitter.kb_retrieval(
+                {
+                    "duration_ms": round((time.time() - t_kb) * 1000),
+                    "file": kb_file.name,
+                    "chars": len(protected_context),
+                    "preview": protected_context[:400],
+                }
+            )
+        else:
+            kb_miss = {
+                "duration_ms": round((time.time() - t_kb) * 1000),
+                "error": f"Not found: {customer_id}.txt",
+            }
+            trace.append({"step": "KB File Retrieval", **kb_miss})
+            emitter.kb_retrieval(kb_miss)
 
         # Register tokens for Gate 2 resolution
         if protected_context:
@@ -318,6 +393,17 @@ def api_chat():
             {
                 "step": "LangGraph Orchestrator",
                 "duration_ms": round((time.time() - t_orch) * 1000),
+                "orchestrator": "langgraph",
+                "sub_trace": result.trace,
+                "response_preview": result.answer[:500],
+            }
+        )
+        emitter.orchestrator(
+            {
+                "duration_ms": round((time.time() - t_orch) * 1000),
+                "orchestrator": "langgraph",
+                "sub_trace": result.trace,
+                "response_preview": result.answer[:500],
             }
         )
 
@@ -331,7 +417,14 @@ def api_chat():
             {
                 "step": "Gate 2 — Output Unprotection",
                 "duration_ms": round((time.time() - t_g2) * 1000),
+                "raw_response": raw_answer,
+                "final_response": final_answer,
             }
+        )
+        emitter.gate2(
+            raw_response=raw_answer,
+            final_response=final_answer,
+            duration_ms=round((time.time() - t_g2) * 1000),
         )
 
         # ── Update history ───────────────────────────────────────
@@ -339,18 +432,35 @@ def api_chat():
         history.append({"role": "assistant", "content": raw_answer})
         _save_history(customer_id)
 
+        total_ms = round((time.time() - t0) * 1000)
+        emitter.complete(blocked=False, total_ms=total_ms, response=final_answer)
+        _append_trace_log(
+            customer_id,
+            {
+                "id": trace_id,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "user_message": user_message,
+                "protected_message": protected_message,
+                "response_preview": final_answer[:300],
+                "blocked": False,
+                "duration_ms": total_ms,
+                "trace": trace,
+            },
+        )
+
         return jsonify(
             {
                 "response": final_answer,
                 "blocked": False,
                 "trace": trace,
-                "duration_ms": round((time.time() - t0) * 1000),
+                "trace_id": trace_id,
+                "duration_ms": total_ms,
             }
         )
 
     except Exception as e:
         log.exception("Chat error")
-        return jsonify({"error": str(e), "trace": trace}), 500
+        return jsonify({"error": str(e), "trace": trace, "trace_id": trace_id}), 500
 
 
 @app.route("/bank/api/chat/clear", methods=["POST"])
@@ -361,6 +471,23 @@ def api_chat_clear():
     key = _history_key(customer_id)
     _chat_histories[key] = []
     _save_history(customer_id)
+    return jsonify({"status": "ok"})
+
+
+@app.route("/bank/api/traces")
+@_login_required
+def api_traces():
+    """Return pipeline trace logs for the logged-in customer."""
+    customer_id = session["customer_id"]
+    return jsonify({"traces": _trace_logs.get(customer_id, [])})
+
+
+@app.route("/bank/api/traces/clear", methods=["POST"])
+@_login_required
+def api_traces_clear():
+    """Clear pipeline trace logs for the logged-in customer."""
+    customer_id = session["customer_id"]
+    _trace_logs[customer_id] = []
     return jsonify({"status": "ok"})
 
 

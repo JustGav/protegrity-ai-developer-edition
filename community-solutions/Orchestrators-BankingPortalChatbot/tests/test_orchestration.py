@@ -40,7 +40,7 @@ class TestOrchestrationConfig:
 
     def test_default_llm_provider(self):
         import config.orchestration_config as cfg
-        assert cfg.LLM_PROVIDER in ("openai", "anthropic", "groq")
+        assert cfg.LLM_PROVIDER == "ollama"
 
     def test_get_model_name_default(self):
         import config.orchestration_config as cfg
@@ -49,8 +49,9 @@ class TestOrchestrationConfig:
 
     def test_default_models_all_providers(self):
         import config.orchestration_config as cfg
-        for provider in ("openai", "anthropic", "groq"):
+        for provider in ("ollama", "openai", "anthropic", "grok"):
             assert provider in cfg.DEFAULT_MODELS
+            assert provider in cfg.LLM_PROVIDERS
 
     def test_gate_settings_types(self):
         import config.orchestration_config as cfg
@@ -64,6 +65,34 @@ class TestOrchestrationConfig:
         assert isinstance(cfg.USE_KNOWLEDGE_GRAPH, bool)
         assert isinstance(cfg.USE_CHROMADB, bool)
         assert cfg.RAG_TOP_K > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# 1b. LLM API keys tests
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestLLMApiKeys:
+
+    def test_mask_api_key(self):
+        from config.llm_api_keys import mask_api_key
+        assert mask_api_key("") == ""
+        assert mask_api_key("short") == "••••••••"
+        assert mask_api_key("sk-abcdefghijklmnop") == "sk-a••••mnop"
+
+    def test_set_and_get_api_key(self, tmp_path, monkeypatch):
+        import config.llm_api_keys as keys
+
+        monkeypatch.setattr(keys, "KEYS_FILE", tmp_path / "llm_api_keys.local.json")
+        keys._runtime_keys.clear()
+        keys._initialized = False
+
+        keys.set_api_key("openai", "sk-test-key-12345")
+        assert keys.get_api_key("openai") == "sk-test-key-12345"
+        assert os.environ.get("OPENAI_API_KEY") == "sk-test-key-12345"
+
+        status = keys.get_keys_status()
+        assert status["openai"]["configured"] is True
+        assert "sk-t" in status["openai"]["masked"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -194,6 +223,28 @@ class TestRAGRetriever:
 
 class TestLLMProviderFactory:
 
+    def test_ollama_factory(self):
+        import llm_providers.factory as fac
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "message": {"content": "Local!"}
+        }
+
+        original = fac.requests
+        try:
+            fac.requests = MagicMock()
+            fac.requests.post.return_value = mock_response
+            with patch("llm_providers.factory.get_ollama_base_url", return_value="http://localhost:11434"):
+                llm = fac._ollama_llm("qwen3.5:0.8b")
+                result = llm([{"role": "user", "content": "Hi"}])
+            assert result == "Local!"
+            payload = fac.requests.post.call_args.kwargs["json"]
+            assert payload["think"] is False
+        finally:
+            fac.requests = original
+
     def test_openai_factory(self):
         import llm_providers.factory as fac
 
@@ -201,17 +252,18 @@ class TestLLMProviderFactory:
         mock_client = MagicMock()
         mock_openai.OpenAI.return_value = mock_client
         mock_client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content="Hello!"))]
+            choices=[MagicMock(message=MagicMock(content="Hello from GPT"))]
         )
 
-        original = fac.openai
+        original_openai = fac.openai
         try:
             fac.openai = mock_openai
-            llm = fac._openai_llm("gpt-4o-mini")
-            result = llm([{"role": "user", "content": "Hi"}])
-            assert result == "Hello!"
+            with patch("llm_providers.factory.get_api_key", return_value="sk-test"):
+                llm = fac._openai_llm("gpt-4o-mini")
+                result = llm([{"role": "user", "content": "Hi"}])
+            assert result == "Hello from GPT"
         finally:
-            fac.openai = original
+            fac.openai = original_openai
 
     def test_anthropic_separates_system(self):
         import llm_providers.factory as fac
@@ -220,72 +272,52 @@ class TestLLMProviderFactory:
         mock_client = MagicMock()
         mock_anthropic.Anthropic.return_value = mock_client
         mock_client.messages.create.return_value = MagicMock(
-            content=[MagicMock(text="Bonjour!")]
+            content=[MagicMock(text="Claude says hi")]
         )
 
-        original = fac.anthropic
+        original_anthropic = fac.anthropic
         try:
             fac.anthropic = mock_anthropic
-            llm = fac._anthropic_llm("claude-test")
-            result = llm([
-                {"role": "system", "content": "Be helpful"},
-                {"role": "user", "content": "Hi"},
-            ])
-            assert result == "Bonjour!"
-            call_kwargs = mock_client.messages.create.call_args
-            assert "Be helpful" in call_kwargs.kwargs["system"]
-            assert call_kwargs.kwargs["messages"] == [{"role": "user", "content": "Hi"}]
+            with patch("llm_providers.factory.get_api_key", return_value="sk-ant-test"):
+                llm = fac._anthropic_llm("claude-test")
+                result = llm([
+                    {"role": "system", "content": "Be helpful."},
+                    {"role": "user", "content": "Hi"},
+                ])
+            assert result == "Claude says hi"
+            call_kwargs = mock_client.messages.create.call_args.kwargs
+            assert "Be helpful." in call_kwargs["system"]
+            assert call_kwargs["messages"] == [{"role": "user", "content": "Hi"}]
         finally:
-            fac.anthropic = original
+            fac.anthropic = original_anthropic
 
-    def test_groq_factory(self):
+    def test_grok_factory(self):
         import llm_providers.factory as fac
 
-        mock_groq_cls = MagicMock()
+        mock_openai = MagicMock()
         mock_client = MagicMock()
-        mock_groq_cls.return_value = mock_client
+        mock_openai.OpenAI.return_value = mock_client
         mock_client.chat.completions.create.return_value = MagicMock(
-            choices=[MagicMock(message=MagicMock(content="Fast!"))]
+            choices=[MagicMock(message=MagicMock(content="Grok says hi"))]
         )
 
-        original = fac.Groq
+        original_openai = fac.openai
         try:
-            fac.Groq = mock_groq_cls
-            llm = fac._groq_llm("llama-3.1-70b-versatile")
-            result = llm([{"role": "user", "content": "Hi"}])
-            assert result == "Fast!"
+            fac.openai = mock_openai
+            with patch("llm_providers.factory.get_api_key", return_value="xai-test"):
+                llm = fac._grok_llm("grok-3-mini")
+                result = llm([{"role": "user", "content": "Hi"}])
+            assert result == "Grok says hi"
+            mock_openai.OpenAI.assert_called_with(api_key="xai-test", base_url="https://api.x.ai/v1")
         finally:
-            fac.Groq = original
+            fac.openai = original_openai
 
-    def test_openai_missing_raises(self):
+    def test_openai_missing_key_raises(self):
         import llm_providers.factory as fac
-        original = fac.openai
-        try:
-            fac.openai = None
-            with pytest.raises(ImportError, match="pip install openai"):
+
+        with patch("llm_providers.factory.get_api_key", return_value=""):
+            with pytest.raises(ValueError, match="OpenAI API key not configured"):
                 fac._openai_llm("gpt-4o-mini")
-        finally:
-            fac.openai = original
-
-    def test_anthropic_missing_raises(self):
-        import llm_providers.factory as fac
-        original = fac.anthropic
-        try:
-            fac.anthropic = None
-            with pytest.raises(ImportError, match="pip install anthropic"):
-                fac._anthropic_llm("claude-test")
-        finally:
-            fac.anthropic = original
-
-    def test_groq_missing_raises(self):
-        import llm_providers.factory as fac
-        original = fac.Groq
-        try:
-            fac.Groq = None
-            with pytest.raises(ImportError, match="pip install groq"):
-                fac._groq_llm("llama-test")
-        finally:
-            fac.Groq = original
 
 
 # ═══════════════════════════════════════════════════════════════════════

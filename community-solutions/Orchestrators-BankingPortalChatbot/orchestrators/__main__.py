@@ -2,7 +2,7 @@
 CLI entry point for orchestrated pipeline.
 
 Usage:
-    ORCHESTRATOR=langgraph LLM_PROVIDER=openai python -m orchestrators
+    ORCHESTRATOR=langgraph LLM_PROVIDER=ollama python -m orchestrators
 """
 
 import logging
@@ -31,7 +31,7 @@ from config.orchestration_config import RISK_THRESHOLD, PROTEGRITY_USER
 from orchestrators import ask
 
 orch_name = os.environ.get("ORCHESTRATOR", "langgraph")
-provider = os.environ.get("LLM_PROVIDER", "openai")
+provider = os.environ.get("LLM_PROVIDER", "ollama")
 print(f"\n{'='*60}")
 print(f"  Orchestrator : {orch_name}")
 print(f"  LLM Provider : {provider}")

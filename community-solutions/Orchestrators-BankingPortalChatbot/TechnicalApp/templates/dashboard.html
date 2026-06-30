@@ -4,27 +4,21 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chatbot Integration App with Orchestrators & LLMs – Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/protegrity-theme.css') }}">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }
-        .topbar { background: #1e293b; padding: 1rem 2rem; display: flex;
-                  justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-        .topbar h1 { font-size: 1.2rem; color: #38bdf8; }
-        .topbar .user-info { color: #94a3b8; font-size: 0.85rem; }
-        .topbar .user-info .role-badge { background: #7c3aed; color: white; padding: 2px 8px;
-                 border-radius: 10px; font-size: 0.7rem; margin-left: 0.5rem; }
-        .topbar a { color: #f87171; text-decoration: none; margin-left: 1rem; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--pg-bg); color: #e2e8f0; }
         .container { max-width: 1200px; margin: 2rem auto; padding: 0 1.5rem; }
         .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; }
-        .card { background: #1e293b; border-radius: 10px; padding: 1.5rem;
-                border: 1px solid #334155; }
-        .card h2 { font-size: 1rem; color: #38bdf8; margin-bottom: 1rem;
-                   border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
-        label { display: block; color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.25rem; margin-top: 0.75rem; }
+        .card { background: var(--pg-surface); border-radius: 10px; padding: 1.5rem;
+                border: 1px solid var(--pg-border); }
+        .card h2 { font-size: 1rem; color: var(--pg-orange); margin-bottom: 1rem;
+                   border-bottom: 1px solid var(--pg-border); padding-bottom: 0.5rem; }
+        label { display: block; color: var(--pg-slate); font-size: 0.8rem; margin-bottom: 0.25rem; margin-top: 0.75rem; }
         select, input[type="number"], input[type="text"] {
-            width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #334155;
+            width: 100%; padding: 0.5rem; background: var(--pg-bg); border: 1px solid var(--pg-border);
             border-radius: 6px; color: #e2e8f0; font-size: 0.9rem; }
-        select:focus, input:focus { outline: none; border-color: #38bdf8; }
+        select:focus, input:focus { outline: none; border-color: var(--pg-orange); }
         select:disabled { opacity: 0.5; cursor: not-allowed; }
         .toggle-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
         .toggle { position: relative; width: 44px; height: 24px; }
@@ -33,41 +27,51 @@
                           border-radius: 24px; transition: 0.3s; }
         .toggle .slider:before { content: ""; position: absolute; height: 18px; width: 18px;
                                   left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: 0.3s; }
-        .toggle input:checked + .slider { background: #22c55e; }
+        .toggle input:checked + .slider { background: var(--pg-orange); }
         .toggle input:checked + .slider:before { transform: translateX(20px); }
         .btn { padding: 0.6rem 1.5rem; border: none; border-radius: 6px; cursor: pointer;
                font-size: 0.9rem; margin-top: 1rem; }
-        .btn-primary { background: #7c3aed; color: white; }
-        .btn-primary:hover { background: #6d28d9; }
+        .btn-primary { background: var(--pg-orange); color: white; }
+        .btn-primary:hover { background: var(--pg-orange-dark); }
         .status-bar { margin-top: 1rem; padding: 0.5rem; border-radius: 6px;
-                      background: #334155; font-size: 0.8rem; color: #94a3b8; display: none; }
+                      background: var(--pg-border); font-size: 0.8rem; color: var(--pg-slate); display: none; }
         .status-bar.show { display: block; }
-        .status-bar.success { background: #14532d; color: #86efac; }
+        .status-bar.success { background: #3d1f12; color: #ffb088; }
         .customer-list { margin-top: 1rem; }
         .customer-btn { display: inline-block; padding: 0.4rem 0.8rem; margin: 0.25rem;
-                        background: #334155; border: 1px solid #475569; border-radius: 6px;
+                        background: var(--pg-border); border: 1px solid #3d4455; border-radius: 6px;
                         color: #e2e8f0; text-decoration: none; font-size: 0.8rem; font-family: monospace; }
-        .customer-btn:hover { background: #475569; border-color: #38bdf8; }
-        .section-title { color: #94a3b8; font-size: 0.85rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
-        .info-panel { background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+        .customer-btn:hover { background: #3d4455; border-color: var(--pg-orange); }
+        .section-title { color: var(--pg-slate); font-size: 0.85rem; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+        .info-panel { background: var(--pg-bg); border: 1px solid var(--pg-border); border-radius: 8px;
                       padding: 1.2rem; margin-bottom: 1rem; }
-        .info-panel h3 { color: #a78bfa; font-size: 0.95rem; margin-bottom: 0.75rem; }
+        .info-panel h3 { color: var(--pg-orange-light); font-size: 0.95rem; margin-bottom: 0.75rem; }
         .info-panel ul { list-style: none; padding: 0; }
-        .info-panel ul li { position: relative; padding: 0.4rem 0 0.4rem 1.2rem; color: #94a3b8;
-                            font-size: 0.8rem; line-height: 1.4; border-bottom: 1px solid #1e293b; }
+        .info-panel ul li { position: relative; padding: 0.4rem 0 0.4rem 1.2rem; color: var(--pg-slate);
+                            font-size: 0.8rem; line-height: 1.4; border-bottom: 1px solid var(--pg-surface); }
         .info-panel ul li:last-child { border-bottom: none; }
-        .info-panel ul li::before { content: "✦"; position: absolute; left: 0; color: #7c3aed; font-size: 0.7rem; }
+        .info-panel ul li::before { content: "✦"; position: absolute; left: 0; color: var(--pg-orange); font-size: 0.7rem; }
         .locked-badge { display: inline-block; background: #dc2626; color: white; padding: 1px 6px;
                         border-radius: 4px; font-size: 0.65rem; margin-left: 0.5rem; vertical-align: middle; }
         .hint { text-align: center; color: #64748b; font-size: 0.75rem; margin-top: 1rem; }
-        .hint code { background: #334155; padding: 1px 4px; border-radius: 3px; color: #94a3b8; }
+        .hint code { background: var(--pg-border); padding: 1px 4px; border-radius: 3px; color: var(--pg-slate); }
         .toggle-row.disabled { opacity: 0.35; pointer-events: none; }
-        .toggle-row.disabled .slider { background: #334155 !important; cursor: not-allowed; }
+        .toggle-row.disabled .slider { background: var(--pg-border) !important; cursor: not-allowed; }
+        .key-row { margin-top: 0.75rem; }
+        .key-status { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+        .key-status.configured { color: #22c55e; }
+        input[type="password"] {
+            width: 100%; padding: 0.5rem; background: var(--pg-bg); border: 1px solid var(--pg-border);
+            border-radius: 6px; color: #e2e8f0; font-size: 0.9rem; font-family: monospace; }
     </style>
 </head>
 <body>
     <div class="topbar">
-        <h1>🔧 TechnicalApp Dashboard</h1>
+        <div class="topbar-brand">
+            <img src="{{ url_for('static', filename='images/protegrity-logo.svg') }}" alt="Protegrity" class="topbar-logo">
+            <span class="topbar-brand-divider"></span>
+            <h1>TechnicalApp Dashboard</h1>
+        </div>
         <div class="user-info">
             {{ username }} <span class="role-badge">{{ role }}</span>
             {% if locked_orchestrator %}
@@ -116,16 +120,40 @@
                 </select>
 
                 <label for="llm_provider">LLM Provider</label>
-                <select id="llm_provider" onchange="document.getElementById('llm_model').value = ''">
+                <select id="llm_provider" onchange="onProviderChange()">
                     {% for p in llm_providers %}
-                    <option value="{{ p }}" {% if p == config.llm_provider %}selected{% endif %}>{{ p }}</option>
+                    <option value="{{ p }}" {% if p == config.llm_provider %}selected{% endif %}>{{ llm_provider_labels.get(p, p) }}</option>
                     {% endfor %}
                 </select>
 
                 <label for="llm_model">LLM Model (blank = auto)</label>
-                <input type="text" id="llm_model" value="{{ config.llm_model }}" placeholder="e.g. gpt-4o-mini">
+                <input type="text" id="llm_model" value="{{ config.llm_model }}" placeholder="e.g. gpt-4o-mini, claude-sonnet-4-20250514">
 
-                <hr style="border-color: #334155; margin-top: 1.5rem;">
+                <hr style="border-color: var(--pg-border); margin-top: 1.5rem;">
+
+                <h2 style="margin-top: 1rem;">🔑 LLM API Keys</h2>
+                <p style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.5rem;">
+                    Required for cloud providers. Keys are stored locally and never returned in full.
+                </p>
+
+                {% for provider in cloud_providers %}
+                <div class="key-row">
+                    <label for="key_{{ provider }}">{{ llm_provider_labels.get(provider, provider) }} API Key</label>
+                    <input type="password" id="key_{{ provider }}" placeholder="Enter new key to update…" autocomplete="off">
+                    <div class="key-status {% if llm_keys[provider].configured %}configured{% endif %}" id="key_status_{{ provider }}">
+                        {% if llm_keys[provider].configured %}
+                        Configured: {{ llm_keys[provider].masked }}
+                        {% else %}
+                        Not configured
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+
+                <button class="btn btn-primary" style="margin-top: 0.75rem;" onclick="saveApiKeys()">🔐 Save API Keys</button>
+                <div id="keys-status" class="status-bar"></div>
+
+                <hr style="border-color: var(--pg-border); margin-top: 1.5rem;">
 
                 <h2 style="margin-top: 1rem;">📚 Data Sources <span id="ds-lock-badge" style="font-size: 0.65rem; color: #fbbf24; font-weight: normal;">(auto-set by orchestrator)</span></h2>
 
@@ -153,7 +181,7 @@
                     <span style="color: #e2e8f0; font-size: 0.85rem;" id="ds-kg-label">Knowledge Graph (NetworkX)</span>
                 </div>
 
-                <hr style="border-color: #334155; margin-top: 1.5rem;">
+                <hr style="border-color: var(--pg-border); margin-top: 1.5rem;">
 
                 <h2 style="margin-top: 1rem;">🛡️ Protegrity Settings</h2>
 
@@ -213,9 +241,9 @@
                 </div>
 
                 <p class="section-title">Current Configuration Summary</p>
-                <div style="background: #0f172a; border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.8rem;">
-                    <div>Orchestrator: <span style="color: #38bdf8;" id="summary-orch">{{ config.orchestrator }}</span></div>
-                    <div>LLM: <span style="color: #a78bfa;" id="summary-llm">{{ config.llm_provider }}/{{ config.llm_model }}</span></div>
+                <div style="background: var(--pg-bg); border-radius: 6px; padding: 1rem; font-family: monospace; font-size: 0.8rem;">
+                    <div>Orchestrator: <span style="color: var(--pg-orange);" id="summary-orch">{{ config.orchestrator }}</span></div>
+                    <div>LLM: <span style="color: var(--pg-orange-light);" id="summary-llm">{{ config.llm_provider }}/{{ config.llm_model }}</span></div>
                     <div>Guardrail Threshold: <span style="color: #fbbf24;" id="summary-threshold">{{ config.risk_threshold }}</span></div>
                     <div>Guardrail: <span style="color: #22c55e;" id="summary-guardrail">{{ "ON" if config.guardrail_enabled else "OFF" }}</span></div>
                     <div>Discovery: <span style="color: #22c55e;" id="summary-discovery">{{ "ON" if config.discovery_enabled else "OFF" }}</span></div>
@@ -270,7 +298,7 @@
                     "Purpose-built for RAG \u2014 ChromaDB vector search over pre-tokenized documents.",
                     "Semantic similarity finds relevant customer data even across tokenized fields.",
                     "Protegrity tokens in the vector index guarantee zero PII exposure at the embedding layer.",
-                    "Native LLM adapters (OpenAI, Anthropic, Groq) with clean Protegrity integration.",
+                    "Native LLM adapters (OpenAI, Anthropic, Grok) with clean Protegrity integration.",
                     "Best when semantic search quality matters \u2014 retrieval over protected document collections."
                 ],
                 "data_sources": {"kb": true, "rag": true, "kg": false}
@@ -305,8 +333,66 @@
             }
         }
 
+        const DEFAULT_MODELS = {
+            "ollama": "qwen3.5:0.8b",
+            "openai": "gpt-4o-mini",
+            "anthropic": "claude-sonnet-4-20250514",
+            "grok": "grok-3-mini",
+        };
+
+        function onProviderChange() {
+            document.getElementById('llm_model').value = '';
+            const provider = document.getElementById('llm_provider').value;
+            const modelInput = document.getElementById('llm_model');
+            modelInput.placeholder = 'auto: ' + (DEFAULT_MODELS[provider] || '');
+        }
+
+        async function saveApiKeys() {
+            const payload = {};
+            {% for provider in cloud_providers %}
+            const key{{ provider }} = document.getElementById('key_{{ provider }}').value.trim();
+            if (key{{ provider }}) payload['{{ provider }}'] = key{{ provider }};
+            {% endfor %}
+
+            if (Object.keys(payload).length === 0) {
+                const status = document.getElementById('keys-status');
+                status.textContent = 'Enter at least one API key to save.';
+                status.className = 'status-bar show';
+                setTimeout(function() { status.className = 'status-bar'; }, 3000);
+                return;
+            }
+
+            const res = await fetch('{{ url_for("api_update_llm_keys") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+
+            const status = document.getElementById('keys-status');
+            status.textContent = '\u2705 Keys updated: ' + data.updated.join(', ');
+            status.className = 'status-bar show success';
+
+            for (const [provider, info] of Object.entries(data.keys)) {
+                const el = document.getElementById('key_status_' + provider);
+                if (info.configured) {
+                    el.textContent = 'Configured: ' + info.masked;
+                    el.className = 'key-status configured';
+                } else {
+                    el.textContent = 'Not configured';
+                    el.className = 'key-status';
+                }
+                document.getElementById('key_' + provider).value = '';
+            }
+
+            setTimeout(function() { status.className = 'status-bar'; }, 3000);
+        }
+
         // Apply on page load
-        document.addEventListener('DOMContentLoaded', function() { updateInfoPanel(); });
+        document.addEventListener('DOMContentLoaded', function() {
+            updateInfoPanel();
+            onProviderChange();
+        });
 
         async function saveConfig() {
             const config = {

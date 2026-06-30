@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline Observer — Live Flow</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/protegrity-theme.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/observer.css') }}">
+</head>
+<body class="observer-body">
+    <nav class="topbar">
+        <div class="topbar-brand">
+            <img src="{{ url_for('static', filename='images/protegrity-logo.svg') }}" alt="Protegrity" class="topbar-logo">
+            <span class="topbar-brand-divider"></span>
+            <h1>Pipeline Observer</h1>
+        </div>
+        <div class="topbar-actions">
+            <span class="live-indicator"><span class="live-dot"></span> Live</span>
+            <span class="user-info">{{ username }} · {{ role }}</span>
+            <a href="{{ url_for('logout') }}">Sign Out</a>
+        </div>
+    </nav>
+
+    <main class="observer-main">
+        <section class="controls-bar">
+            <div class="filter-group">
+                <span class="controls-label">Source</span>
+                <button type="button" class="filter-chip active" data-filter="all">All</button>
+                <button type="button" class="filter-chip" data-filter="business">Business</button>
+                <button type="button" class="filter-chip" data-filter="technical">Technical</button>
+            </div>
+            <div class="data-legend">
+                <span class="legend-item"><span class="legend-swatch state-protected"></span> PROTECTED</span>
+                <span class="legend-item"><span class="legend-swatch state-clear"></span> UNPROTECTED</span>
+            </div>
+            <label class="checkbox-row">
+                <input type="checkbox" id="fullPayloads">
+                Show full payloads
+            </label>
+            <button type="button" class="btn-clear" id="clearEventsBtn">Clear history</button>
+        </section>
+
+        <section class="diagram-section card-panel">
+            <div class="panel-header">
+                <h2>Live Pipeline</h2>
+                <span class="panel-sub" id="activeRunLabel">Waiting for chat activity…</span>
+            </div>
+            <div class="pipeline-diagram" id="pipelineDiagram">
+                <div class="pipe-node" data-node="customer"><span class="pipe-icon">👤</span><span class="pipe-label">Customer</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="gate1"><span class="pipe-icon">🛡️</span><span class="pipe-label">Gate 1</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="kb"><span class="pipe-icon">📚</span><span class="pipe-label">Retrieval</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="orchestrator"><span class="pipe-icon">🔄</span><span class="pipe-label">Orchestrator</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="llm"><span class="pipe-icon">🤖</span><span class="pipe-label">LLM</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="gate2"><span class="pipe-icon">🔓</span><span class="pipe-label">Gate 2</span></div>
+                <div class="pipe-arrow">→</div>
+                <div class="pipe-node" data-node="response"><span class="pipe-icon">✅</span><span class="pipe-label">Response</span></div>
+            </div>
+        </section>
+
+        <section class="timeline-section card-panel">
+            <div class="panel-header">
+                <h2>Event Timeline</h2>
+                <span class="panel-sub" id="runCountLabel">0 runs</span>
+            </div>
+            <div class="timeline" id="timeline">
+                <p class="empty-state">Send a chat message in the Banking or Technical portal to see live pipeline events.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/observer.js') }}"></script>
+</body>
+</html>

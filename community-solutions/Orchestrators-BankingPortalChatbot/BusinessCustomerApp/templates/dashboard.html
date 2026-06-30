@@ -10,11 +10,15 @@
     <!-- Top Navigation -->
     <nav class="navbar">
         <div class="nav-brand">
-            <span class="nav-logo">🏦</span>
+            <img src="{{ url_for('static', filename='images/protegrity-logo.svg') }}" alt="Protegrity" class="nav-logo-img">
+            <span class="nav-title-divider"></span>
             <span class="nav-title">Banking Cloud Portal</span>
         </div>
         <div class="nav-user">
             <span class="user-greeting">Welcome, <strong>{{ customer_name }}</strong></span>
+            <button type="button" class="btn btn-sm btn-outline" id="traceModalBtn" title="View pipeline traces">
+                Pipeline Trace <span class="trace-badge" id="traceBadge">0</span>
+            </button>
             <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">Sign Out</a>
         </div>
     </nav>
@@ -22,6 +26,39 @@
     <div class="main-layout">
         <!-- Dashboard Content -->
         <div class="dashboard-panel" id="dashboardPanel">
+            <!-- Personal Details -->
+            <div class="section personal-section">
+                <h2 class="section-title">Personal Details</h2>
+                <div class="card personal-details-card">
+                    <div class="personal-details-grid">
+                        <div class="personal-field">
+                            <span class="personal-label">Full Name</span>
+                            <span class="personal-value" id="personalName">Loading...</span>
+                        </div>
+                        <div class="personal-field">
+                            <span class="personal-label">Customer ID</span>
+                            <span class="personal-value" id="personalCustomerId">—</span>
+                        </div>
+                        <div class="personal-field">
+                            <span class="personal-label">Email</span>
+                            <span class="personal-value" id="personalEmail">—</span>
+                        </div>
+                        <div class="personal-field">
+                            <span class="personal-label">Phone</span>
+                            <span class="personal-value" id="personalPhone">—</span>
+                        </div>
+                        <div class="personal-field personal-field-wide">
+                            <span class="personal-label">Address</span>
+                            <span class="personal-value" id="personalAddress">—</span>
+                        </div>
+                        <div class="personal-field">
+                            <span class="personal-label">Date of Birth</span>
+                            <span class="personal-value" id="personalDob">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Summary Cards -->
             <div class="summary-cards" id="summaryCards">
                 <div class="card summary-card">
@@ -161,6 +198,29 @@
         <button class="chat-toggle" id="chatToggle" title="Open AI Assistant">
             💬
         </button>
+    </div>
+
+    <!-- Pipeline Trace Modal -->
+    <div class="trace-modal-overlay" id="traceModalOverlay" hidden>
+        <div class="trace-modal" role="dialog" aria-labelledby="traceModalTitle">
+            <div class="trace-modal-header">
+                <h2 id="traceModalTitle">Pipeline Trace</h2>
+                <div class="trace-modal-actions">
+                    <button type="button" class="btn btn-sm btn-outline" id="traceClearBtn">Clear</button>
+                    <button type="button" class="btn btn-sm btn-outline" id="traceModalClose">✕</button>
+                </div>
+            </div>
+            <p class="trace-modal-hint">
+                LLM and orchestrator message flow for each chat request in this session.
+                <span class="trace-legend">
+                    <span class="legend-item"><span class="legend-swatch state-protected"></span> PROTECTED</span>
+                    <span class="legend-item"><span class="legend-swatch state-clear"></span> UNPROTECTED</span>
+                </span>
+            </p>
+            <div class="trace-modal-body" id="traceModalBody">
+                <p class="trace-empty">Send a chat message to capture pipeline traces.</p>
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>

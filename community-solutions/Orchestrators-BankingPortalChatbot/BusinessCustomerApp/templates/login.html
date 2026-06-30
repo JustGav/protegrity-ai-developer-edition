@@ -8,9 +8,11 @@
 </head>
 <body class="login-page">
     <div class="login-container">
+        <div class="login-logo-bar">
+            <img src="{{ url_for('static', filename='images/protegrity-logo.svg') }}" alt="Protegrity">
+        </div>
         <div class="login-card">
             <div class="login-header">
-                <div class="bank-logo">🏦</div>
                 <h1>Banking Cloud Portal</h1>
                 <p class="subtitle">Secure Customer Access</p>
             </div>
@@ -107,7 +109,7 @@
     border-radius: 4px;
     transition: background 0.15s;
 }
-.demo-table tbody tr:hover { background: rgba(99,179,237,0.15); }
+.demo-table tbody tr:hover { background: rgba(250,90,37,0.18); }
 </style>
 
 <script>

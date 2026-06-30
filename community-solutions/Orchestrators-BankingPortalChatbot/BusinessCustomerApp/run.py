@@ -24,4 +24,4 @@ import app as app_module
 if __name__ == "__main__":
     port = int(os.environ.get("BUSINESS_PORT", 5003))
     print(f"[BusinessCustomerApp] Banking Cloud Portal on port {port}")
-    app_module.app.run(host="0.0.0.0", port=port, debug=True)
+    app_module.app.run(host="0.0.0.0", port=port, debug=False)

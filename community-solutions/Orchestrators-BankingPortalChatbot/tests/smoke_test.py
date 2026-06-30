@@ -46,7 +46,7 @@ def main():
         import config.orchestration_config as cfg
         check("Module imports", True)
         check(f"ORCHESTRATOR = {cfg.ORCHESTRATOR!r}", cfg.ORCHESTRATOR in ("langgraph", "crewai", "llamaindex"))
-        check(f"LLM_PROVIDER = {cfg.LLM_PROVIDER!r}", cfg.LLM_PROVIDER in ("openai", "anthropic", "groq"))
+        check(f"LLM_PROVIDER = {cfg.LLM_PROVIDER!r}", cfg.LLM_PROVIDER == "ollama")
         check(f"Model = {cfg.get_model_name()!r}", len(cfg.get_model_name()) > 0)
         check("Gate settings valid", 0 <= cfg.GUARDRAIL_RISK_THRESHOLD <= 1)
     except Exception as e:
@@ -141,7 +141,7 @@ def main():
         except ImportError:
             check(f"{pkg}", None, skip_reason="not installed")
 
-    for lib, pkg in [("openai", "openai"), ("anthropic", "anthropic"), ("groq", "groq")]:
+    for lib, pkg in [("openai", "openai")]:
         try:
             __import__(lib)
             check(f"{pkg} SDK installed", True)

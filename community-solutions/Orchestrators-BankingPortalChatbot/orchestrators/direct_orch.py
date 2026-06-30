@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Optional
 
-from orchestrators.base import BaseOrchestrator, PipelineResult
+from orchestrators.base import BaseOrchestrator, PipelineResult, build_turn_llm_trace
 from llm_providers.factory import get_llm_provider
 
 log = logging.getLogger(__name__)
@@ -52,4 +52,12 @@ class DirectOrchestrator(BaseOrchestrator):
             answer=raw,
             raw_llm_response=raw,
             metadata={"orchestrator": self.name},
+            trace=[
+                build_turn_llm_trace(
+                    "Direct — LLM",
+                    user_message=user_message,
+                    response_preview=raw[:500],
+                    conversation_history=conversation_history,
+                )
+            ],
         )

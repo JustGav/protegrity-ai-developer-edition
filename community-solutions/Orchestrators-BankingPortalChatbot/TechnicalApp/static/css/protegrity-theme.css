@@ -1,0 +1,80 @@
+/* Protegrity brand theme — aligned with protegrity.com */
+:root {
+    --pg-orange: #fa5a25;
+    --pg-orange-dark: #e04a18;
+    --pg-orange-light: #ffb088;
+    --pg-dark: #373737;
+    --pg-slate: #6d758d;
+    --pg-bg: #0b0c10;
+    --pg-surface: #151820;
+    --pg-surface-elevated: #1c2130;
+    --pg-border: #252a36;
+}
+
+.topbar {
+    background: var(--pg-surface);
+    padding: 0.85rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--pg-border);
+}
+
+.topbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.topbar-logo {
+    height: 20px;
+    width: auto;
+    display: block;
+}
+
+.topbar-brand-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--pg-border);
+}
+
+.topbar h1 {
+    font-size: 1.05rem;
+    color: #fff;
+    font-weight: 500;
+}
+
+.topbar .user-info,
+.topbar .info {
+    color: var(--pg-slate);
+    font-size: 0.85rem;
+}
+
+.topbar .user-info .role-badge {
+    background: var(--pg-orange);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    margin-left: 0.5rem;
+}
+
+.topbar a {
+    color: var(--pg-slate);
+    text-decoration: none;
+    margin-left: 1rem;
+}
+
+.topbar a:hover {
+    color: var(--pg-orange-light);
+}
+
+.topbar .user-info > a:last-child,
+.topbar .info > a:last-child {
+    color: var(--pg-orange-light);
+}
+
+.topbar .user-info > a:last-child:hover,
+.topbar .info > a:last-child:hover {
+    color: #fff;
+}

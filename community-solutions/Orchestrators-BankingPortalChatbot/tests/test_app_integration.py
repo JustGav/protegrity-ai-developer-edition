@@ -5,7 +5,7 @@ Tests all combinations of:
   - Pre-prompts (7 from the UI)
   - Customers (CUST-100000 to CUST-100014)
   - Orchestrators (direct, langgraph, crewai, llamaindex)
-  - LLM providers (openai, anthropic, groq)
+  - LLM provider (ollama)
   - Data source combinations per orchestrator
 
 Usage:
@@ -19,8 +19,8 @@ Usage:
     APP_URL=http://localhost:5002 python tests/test_app_integration.py
 
     # Run specific suite:
-    python tests/test_app_integration.py --suite quick     # 1 prompt × 1 customer × direct/openai
-    python tests/test_app_integration.py --suite prompts   # all prompts × 1 customer × direct/openai
+    python tests/test_app_integration.py --suite quick     # 1 prompt × 1 customer × direct/ollama
+    python tests/test_app_integration.py --suite prompts   # all prompts × 1 customer × direct/ollama
     python tests/test_app_integration.py --suite matrix    # 1 prompt × 1 customer × all orchestrator/LLM combos
     python tests/test_app_integration.py --suite full      # all prompts × 3 customers × all combos
 """
@@ -61,7 +61,7 @@ PRE_PROMPTS = [
 ALL_CUSTOMERS = [f"CUST-{100000 + i}" for i in range(15)]
 
 ORCHESTRATORS = ["direct", "langgraph", "crewai", "llamaindex"]
-LLM_PROVIDERS = ["openai", "anthropic", "groq"]
+LLM_PROVIDERS = ["ollama"]
 
 # Data sources allowed per orchestrator
 ORCHESTRATOR_DATA_SOURCES: dict[str, dict[str, bool]] = {
@@ -236,21 +236,21 @@ class TestRunner:
 # ── Test Suites ──────────────────────────────────────────────────────
 
 def suite_quick(runner: TestRunner):
-    """Quick smoke test — 1 prompt, 1 customer, direct/openai."""
+    """Quick smoke test — 1 prompt, 1 customer, direct/ollama."""
     print("\n── Quick Smoke Test ─────────────────────────────────────")
     result = runner.run_test(
-        name="quick | direct/openai | CUST-100000",
+        name="quick | direct/ollama | CUST-100000",
         message=PRE_PROMPTS[0],
         customer_id="CUST-100000",
         orchestrator="direct",
-        llm_provider="openai",
+        llm_provider="ollama",
     )
     runner.add_result(result)
 
 
 def suite_prompts(runner: TestRunner):
-    """All pre-prompts with 1 customer, direct/openai."""
-    print("\n── All Pre-Prompts (direct/openai, CUST-100000) ────────")
+    """All pre-prompts with 1 customer, direct/ollama."""
+    print("\n── All Pre-Prompts (direct/ollama, CUST-100000) ────────")
     for i, prompt in enumerate(PRE_PROMPTS):
         label = prompt[:50]
         expect_blocked = "weather" in prompt.lower()
@@ -259,7 +259,7 @@ def suite_prompts(runner: TestRunner):
             message=prompt,
             customer_id="CUST-100000",
             orchestrator="direct",
-            llm_provider="openai",
+            llm_provider="ollama",
             expect_blocked=expect_blocked,
         )
         runner.add_result(result)
@@ -284,16 +284,16 @@ def suite_matrix(runner: TestRunner):
 
 
 def suite_customers(runner: TestRunner):
-    """All customers with direct/openai."""
-    print("\n── All Customers (direct/openai) ────────────────────────")
+    """All customers with direct/ollama."""
+    print("\n── All Customers (direct/ollama) ────────────────────────")
     prompt = PRE_PROMPTS[0]
     for cid in ALL_CUSTOMERS:
         result = runner.run_test(
-            name=f"direct/openai | {cid}",
+            name=f"direct/ollama | {cid}",
             message=prompt,
             customer_id=cid,
             orchestrator="direct",
-            llm_provider="openai",
+            llm_provider="ollama",
         )
         runner.add_result(result)
 
@@ -308,17 +308,17 @@ def suite_data_sources(runner: TestRunner):
             [s for s, v in [("KB", kb), ("RAG", rag), ("KG", kg)] if v]
         ) or "NONE"
         runner.set_config(
-            orchestrator="langgraph", llm_provider="openai",
+            orchestrator="langgraph", llm_provider="ollama",
             kb_enabled=kb, rag_enabled=rag, kg_enabled=kg,
             guardrail_enabled=True, discovery_enabled=True, show_trace=True,
         )
         runner.clear_chat("CUST-100000")
         result = runner.run_test(
-            name=f"langgraph/openai [{src}]",
+            name=f"langgraph/ollama [{src}]",
             message=prompt,
             customer_id="CUST-100000",
             orchestrator="langgraph",
-            llm_provider="openai",
+            llm_provider="ollama",
         )
         runner.add_result(result)
 
@@ -329,17 +329,17 @@ def suite_protegrity_users(runner: TestRunner):
     prompt = PRE_PROMPTS[0]
     for puser in ["superuser", "Marketing", "Finance", "Support"]:
         runner.set_config(
-            orchestrator="direct", llm_provider="openai",
+            orchestrator="direct", llm_provider="ollama",
             protegrity_user=puser,
             guardrail_enabled=True, discovery_enabled=True, show_trace=True,
         )
         runner.clear_chat("CUST-100000")
         result = runner.run_test(
-            name=f"direct/openai | protegrity_user={puser}",
+            name=f"direct/ollama | protegrity_user={puser}",
             message=prompt,
             customer_id="CUST-100000",
             orchestrator="direct",
-            llm_provider="openai",
+            llm_provider="ollama",
         )
         runner.add_result(result)
 

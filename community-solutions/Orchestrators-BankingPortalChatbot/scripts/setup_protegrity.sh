@@ -11,32 +11,20 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CLONE_BASE="${REPO_DIR}/.protegrity-install"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib_python.sh"
 
 # Auto-create and activate venv if not already in one
 VENV_DIR="${REPO_DIR}/.venv"
 if [ -z "${VIRTUAL_ENV:-}" ]; then
-    if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/activate" ]; then
-        rm -rf "$VENV_DIR"
-        echo "Creating virtual environment at ${VENV_DIR} …"
-        if ! python3 -m venv "$VENV_DIR" 2>/dev/null; then
-            # Auto-install python3-venv if missing
-            PYVER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-            echo "python3-venv not found — installing …"
-            sudo apt-get update -qq 2>/dev/null
-            sudo apt-get install -y "python${PYVER}-venv" 2>/dev/null \
-                || sudo apt-get install -y python3-venv 2>/dev/null \
-                || {
-                    echo -e "\033[0;31m✖\033[0m Failed to install python3-venv. Please install manually:"
-                    echo "    sudo apt-get install -y python${PYVER}-venv"
-                    exit 1
-                }
-            rm -rf "$VENV_DIR"
-            python3 -m venv "$VENV_DIR"
-        fi
+    ensure_python_venv "$REPO_DIR" || exit 1
+else
+    if ! python_version_ok python3; then
+        echo -e "\033[0;31m✖\033[0m Active venv uses unsupported Python: $(python3 --version 2>&1)"
+        suggest_python_install
+        exit 1
     fi
-    echo "Activating virtual environment …"
-    # shellcheck disable=SC1091
-    source "$VENV_DIR/bin/activate"
 fi
 
 # Resolve pip command
@@ -52,12 +40,7 @@ else
 fi
 
 # Install project requirements if not yet done
-if [ -f "${REPO_DIR}/config/requirements.txt" ]; then
-    if ! python3 -c "import flask" &>/dev/null; then
-        echo "Installing project requirements …"
-        $PIP install -r "${REPO_DIR}/config/requirements.txt" --quiet
-    fi
-fi
+install_project_requirements "$REPO_DIR" || exit 1
 
 EDITION_REPO="https://github.com/Protegrity-Developer-Edition/protegrity-developer-edition.git"
 PYTHON_REPO="https://github.com/Protegrity-Developer-Edition/protegrity-developer-python.git"
@@ -83,24 +66,61 @@ check_docker() {
     info "Docker is available"
 }
 
-check_docker_compose() {
+resolve_compose() {
     if docker compose version &>/dev/null 2>&1; then
-        COMPOSE_CMD="docker compose"
+        COMPOSE=(docker compose)
     elif command -v docker-compose &>/dev/null; then
-        COMPOSE_CMD="docker-compose"
+        COMPOSE=(docker-compose)
     else
         error "Docker Compose is not installed."
         echo "  → https://docs.docker.com/compose/install/"
         return 1
     fi
-    info "Docker Compose is available ($COMPOSE_CMD)"
+}
+
+check_docker_compose() {
+    resolve_compose || return 1
+    info "Docker Compose is available (${COMPOSE[*]})"
+}
+
+compose_up() {
+    local dir=$1
+    if [[ ! -f "${dir}/docker-compose.yml" && ! -f "${dir}/docker-compose.yaml" ]]; then
+        error "No docker-compose file in ${dir}"
+        return 1
+    fi
+    (cd "$dir" && "${COMPOSE[@]}" up -d)
+}
+
+compose_up_edition_stack() {
+    local edition_dir=$1
+
+    if [[ -f "${edition_dir}/docker-compose.yml" || -f "${edition_dir}/docker-compose.yaml" ]]; then
+        info "Starting Protegrity stack (legacy root compose)…"
+        compose_up "$edition_dir"
+        return
+    fi
+
+    local data_discovery="${edition_dir}/data-discovery"
+    local semantic_guardrail="${edition_dir}/semantic-guardrail"
+
+    if [[ ! -d "$data_discovery" || ! -d "$semantic_guardrail" ]]; then
+        error "Unexpected protegrity-developer-edition layout under ${edition_dir}"
+        echo "  Expected data-discovery/ and semantic-guardrail/ compose directories."
+        return 1
+    fi
+
+    info "Starting classification stack (data-discovery)…"
+    compose_up "$data_discovery"
+    info "Starting semantic guardrail stack…"
+    compose_up "$semantic_guardrail"
 }
 
 check_containers() {
     local running
     running=$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c 'classification_service\|semantic_guardrail\|pattern_provider\|context_provider' || true)
-    if [ "$running" -ge 3 ]; then
-        info "Protegrity containers are running ($running services)"
+    if [ "$running" -ge 4 ]; then
+        info "Protegrity containers are running ($running/4 services)"
         return 0
     else
         warn "Protegrity containers are NOT running ($running/4 services detected)"
@@ -157,9 +177,8 @@ install_docker() {
         return 1
     fi
 
-    if docker compose version &>/dev/null 2>&1; then
-        COMPOSE_CMD="docker compose"
-        info "Docker Compose installed: $(docker compose version)"
+    if resolve_compose; then
+        info "Docker Compose installed: $(docker compose version 2>/dev/null || docker-compose --version)"
     else
         error "Docker Compose not available after Docker install"
         return 1
@@ -181,9 +200,7 @@ install_containers() {
     fi
 
     echo "Starting containers with docker compose (this may take a while on first run)…"
-    cd "$edition_dir"
-    $COMPOSE_CMD up -d
-    cd "$REPO_DIR"
+    compose_up_edition_stack "$edition_dir"
 
     echo ""
     # Wait briefly for containers to start

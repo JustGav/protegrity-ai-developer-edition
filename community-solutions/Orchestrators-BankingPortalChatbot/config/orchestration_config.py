@@ -3,41 +3,63 @@ Orchestration & LLM configuration.
 
 Set ORCHESTRATOR and LLM_PROVIDER via environment variables or change defaults here.
 
-Supported orchestrators: langgraph, crewai, llamaindex
-Supported LLM providers: openai, anthropic, groq
+Supported orchestrators: langgraph, crewai, llamaindex, direct
+Supported LLM providers: ollama, openai (ChatGPT), anthropic (Claude), grok (xAI)
 """
 
 import os
 from dotenv import load_dotenv
 
+from config.local_llm_config import (
+    DEFAULT_CPU_MODEL,
+    resolve_active_ollama_model,
+)
+
 load_dotenv()
+
+LLM_PROVIDERS = ("ollama", "openai", "anthropic", "grok")
+
+LLM_PROVIDER_LABELS = {
+    "ollama": "Ollama (Local)",
+    "openai": "ChatGPT (OpenAI)",
+    "anthropic": "Claude (Anthropic)",
+    "grok": "Grok (xAI)",
+}
 
 # ── Orchestrator selection ───────────────────────────────────────────
 ORCHESTRATOR = os.getenv("ORCHESTRATOR", "langgraph").lower()
-assert ORCHESTRATOR in ("langgraph", "crewai", "llamaindex"), \
+assert ORCHESTRATOR in ("langgraph", "crewai", "llamaindex", "direct"), \
     f"Unknown orchestrator: {ORCHESTRATOR}"
 
 # ── LLM provider selection ──────────────────────────────────────────
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").lower()
-assert LLM_PROVIDER in ("openai", "anthropic", "groq"), \
-    f"Unknown LLM provider: {LLM_PROVIDER}"
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
+assert LLM_PROVIDER in LLM_PROVIDERS, f"Unknown LLM provider: {LLM_PROVIDER}"
 
-# ── LLM model defaults per provider ─────────────────────────────────
+# ── LLM model defaults ───────────────────────────────────────────────
 LLM_MODEL = os.getenv("LLM_MODEL", None)
 
 DEFAULT_MODELS = {
+    "ollama": DEFAULT_CPU_MODEL,
     "openai": "gpt-4o-mini",
     "anthropic": "claude-sonnet-4-20250514",
-    "groq": "llama-3.1-70b-versatile",
+    "grok": "grok-3-mini",
 }
 
-def get_model_name() -> str:
-    return LLM_MODEL or DEFAULT_MODELS[LLM_PROVIDER]
 
-# ── API keys (each provider reads its own) ───────────────────────────
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+def get_model_name(provider: str | None = None) -> str:
+    if LLM_MODEL:
+        return LLM_MODEL
+    p = (provider or os.getenv("LLM_PROVIDER") or LLM_PROVIDER).lower()
+    if p == "ollama":
+        return resolve_active_ollama_model()
+    return DEFAULT_MODELS.get(p, resolve_active_ollama_model())
+
+# ── Ollama settings ──────────────────────────────────────────────────
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_CPU_MODEL = os.getenv("OLLAMA_CPU_MODEL", DEFAULT_CPU_MODEL)
+OLLAMA_GPU_MODEL = os.getenv("OLLAMA_GPU_MODEL", "qwen3.5:4b")
+OLLAMA_GPU_ENABLED = os.getenv("OLLAMA_GPU_ENABLED", "")
+OLLAMA_ACTIVE_MODEL = os.getenv("OLLAMA_ACTIVE_MODEL", "")
 
 # ── RAG / Knowledge Graph settings ──────────────────────────────────
 USE_KNOWLEDGE_GRAPH = os.getenv("USE_KNOWLEDGE_GRAPH", "true").lower() == "true"

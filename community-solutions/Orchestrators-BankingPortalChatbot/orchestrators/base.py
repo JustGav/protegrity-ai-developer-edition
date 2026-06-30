@@ -26,6 +26,28 @@ class PipelineResult:
     blocked: bool = False
     block_reason: str = ""
     metadata: Dict = field(default_factory=dict)
+    trace: List[Dict] = field(default_factory=list)
+
+
+def build_turn_llm_trace(
+    step: str,
+    *,
+    user_message: str,
+    response_preview: str,
+    conversation_history: Optional[List[Dict]] = None,
+    duration_ms: int = 0,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Trace payload scoped to the current user message (not full chat history)."""
+    prior = conversation_history or []
+    return {
+        "step": step,
+        "duration_ms": duration_ms,
+        "turn_messages": [{"role": "user", "content": user_message}],
+        "prior_turns": len(prior),
+        "response_preview": response_preview,
+        **extra,
+    }
 
 
 class BaseOrchestrator(ABC):

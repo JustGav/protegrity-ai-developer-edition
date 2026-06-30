@@ -1,0 +1,16 @@
+# GPU overlay — use with:
+#   docker compose -f infra/llm/docker-compose.yml -f infra/llm/docker-compose.gpu.yml up -d
+# Requires NVIDIA Container Toolkit.
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      OLLAMA_FLASH_ATTENTION: "1"
+      OLLAMA_GPU_ENABLED: "true"

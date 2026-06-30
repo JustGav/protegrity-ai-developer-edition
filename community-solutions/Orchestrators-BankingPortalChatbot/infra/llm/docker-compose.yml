@@ -1,0 +1,37 @@
+# Banking Portal Chatbot — Ollama LLM stack
+#
+# Usage:
+#   docker compose -f infra/llm/docker-compose.yml up -d
+#   bash scripts/start_llm_docker.sh
+#
+# Host port (default): localhost:11435 (avoids conflict with native Ollama on 11434)
+
+name: banking-portal-llm
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: banking_ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_HOST_PORT:-11435}:11434"
+    volumes:
+      - banking-ollama-models:/root/.ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    networks:
+      - llm
+
+networks:
+  llm:
+    name: banking-portal-llm
+
+volumes:
+  banking-ollama-models:
+    name: banking-portal-ollama-models
