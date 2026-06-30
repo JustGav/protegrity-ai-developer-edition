@@ -39,19 +39,25 @@ compose_down() {
 }
 
 stop_protegrity_stack() {
-  if ! resolve_compose; then
-    echo "Docker Compose not available — skipping Protegrity stop"
-    return 0
-  fi
-
   echo ""
   echo "=== Stopping Protegrity containers ==="
-  if [[ -f "${EDITION_DIR}/docker-compose.yml" || -f "${EDITION_DIR}/docker-compose.yaml" ]]; then
-    compose_down "$EDITION_DIR"
-  else
-    compose_down "${EDITION_DIR}/semantic-guardrail"
-    compose_down "${EDITION_DIR}/data-discovery"
+
+  if resolve_compose; then
+    if [[ -f "${EDITION_DIR}/docker-compose.yml" || -f "${EDITION_DIR}/docker-compose.yaml" ]]; then
+      compose_down "$EDITION_DIR"
+    else
+      compose_down "${EDITION_DIR}/semantic-guardrail"
+      compose_down "${EDITION_DIR}/data-discovery"
+    fi
   fi
+
+  # Fallback: remove by container_name (works even when compose v1 cannot parse upstream files)
+  for name in semantic_guardrail classification_service pattern_provider context_provider; do
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx "$name"; then
+      docker rm -f "$name" >/dev/null 2>&1 || true
+    fi
+  done
+
   echo "Protegrity stack stopped"
 }
 

@@ -79,28 +79,120 @@ resolve_compose() {
 }
 
 check_docker_compose() {
+    if ! resolve_compose && command -v apt-get &>/dev/null; then
+        warn "Docker Compose v2 plugin not found — attempting install…"
+        sudo apt-get update -qq 2>/dev/null || true
+        sudo apt-get install -y docker-compose-plugin 2>/dev/null || true
+        resolve_compose || true
+    fi
     resolve_compose || return 1
     info "Docker Compose is available (${COMPOSE[*]})"
     if [[ "${COMPOSE[0]}" == "docker-compose" ]]; then
-        warn "Using legacy docker-compose v1 — image env vars will be pre-resolved automatically"
+        warn "Using legacy docker-compose v1 — will apply a resolved compose override"
+    fi
+}
+
+_nonempty_or() {
+    local value="$1"
+    local fallback="$2"
+    if [[ -n "${value// /}" ]]; then
+        printf '%s' "$value"
+    else
+        printf '%s' "$fallback"
     fi
 }
 
 prepare_protegrity_compose_env() {
-    # docker-compose v1 cannot expand nested ${VAR:-${NESTED:-default}} in compose
-    # files; pre-resolve image refs in bash so compose sees plain values.
-    local registry="${REGISTRY:-ghcr.io/protegrity-ai-developer-edition}"
-    [[ -n "$registry" ]] || registry="ghcr.io/protegrity-ai-developer-edition"
+    # Treat empty strings as unset — bash ${VAR:-default} keeps empty values.
+    local registry pattern_tag context_tag classification_tag sgr_tag
 
-    export DOCKER_NETWORK_NAME="${DOCKER_NETWORK_NAME:-protegrity-network}"
+    registry="$(_nonempty_or "${REGISTRY:-}" "ghcr.io/protegrity-ai-developer-edition")"
+    pattern_tag="$(_nonempty_or "${PATTERN_TAG:-}" "2.0.0.320.59776828")"
+    context_tag="$(_nonempty_or "${CONTEXT_TAG:-}" "2.0.0.242.5041932c")"
+    classification_tag="$(_nonempty_or "${CLASSIFICATION_TAG:-}" "2.0.0.374.8047721c")"
+    sgr_tag="$(_nonempty_or "${SEMANTIC_GUARDRAIL_TAG:-}" "1.1.1-36-1b3de114")"
+
+    PROTEGRITY_REGISTRY="$registry"
+    PROTEGRITY_PATTERN_IMAGE="$(_nonempty_or "${DOCKER_PATTERN_IMAGE:-}" "${registry}/pattern-provider:${pattern_tag}")"
+    PROTEGRITY_CONTEXT_IMAGE="$(_nonempty_or "${DOCKER_CONTEXT_IMAGE:-}" "${registry}/context-provider:${context_tag}")"
+    PROTEGRITY_CLASSIFICATION_IMAGE="$(_nonempty_or "${DOCKER_CLASSIFICATION_IMAGE:-}" "${registry}/classification-service:${classification_tag}")"
+    PROTEGRITY_SEMANTIC_GUARDRAIL_IMAGE="$(_nonempty_or "${DOCKER_SEMANTIC_GUARDRAIL_IMAGE:-}" "${registry}/semantic-guardrail:${sgr_tag}")"
+    PROTEGRITY_NETWORK_NAME="$(_nonempty_or "${DOCKER_NETWORK_NAME:-}" "protegrity-network")"
+    PROTEGRITY_CLASSIFICATION_PORT="$(_nonempty_or "${CLASSIFICATION_PORT:-}" "8580")"
+    PROTEGRITY_SGR_PORT="$(_nonempty_or "${SGR_PORT:-}" "8581")"
+
+    export DOCKER_NETWORK_NAME="$PROTEGRITY_NETWORK_NAME"
     export REGISTRY="$registry"
-    export CLASSIFICATION_PORT="${CLASSIFICATION_PORT:-8580}"
-    export SGR_PORT="${SGR_PORT:-8581}"
+    export CLASSIFICATION_PORT="$PROTEGRITY_CLASSIFICATION_PORT"
+    export SGR_PORT="$PROTEGRITY_SGR_PORT"
+    export DOCKER_PATTERN_IMAGE="$PROTEGRITY_PATTERN_IMAGE"
+    export DOCKER_CONTEXT_IMAGE="$PROTEGRITY_CONTEXT_IMAGE"
+    export DOCKER_CLASSIFICATION_IMAGE="$PROTEGRITY_CLASSIFICATION_IMAGE"
+    export DOCKER_SEMANTIC_GUARDRAIL_IMAGE="$PROTEGRITY_SEMANTIC_GUARDRAIL_IMAGE"
+}
 
-    export DOCKER_PATTERN_IMAGE="${DOCKER_PATTERN_IMAGE:-${registry}/pattern-provider:${PATTERN_TAG:-2.0.0.320.59776828}}"
-    export DOCKER_CONTEXT_IMAGE="${DOCKER_CONTEXT_IMAGE:-${registry}/context-provider:${CONTEXT_TAG:-2.0.0.242.5041932c}}"
-    export DOCKER_CLASSIFICATION_IMAGE="${DOCKER_CLASSIFICATION_IMAGE:-${registry}/classification-service:${CLASSIFICATION_TAG:-2.0.0.374.8047721c}}"
-    export DOCKER_SEMANTIC_GUARDRAIL_IMAGE="${DOCKER_SEMANTIC_GUARDRAIL_IMAGE:-${registry}/semantic-guardrail:${SEMANTIC_GUARDRAIL_TAG:-1.1.1-36-1b3de114}}"
+write_standalone_compose_v1() {
+    local dir=$1
+    local standalone_file=$2
+    local stack
+    stack="$(basename "$dir")"
+
+    case "$stack" in
+        data-discovery)
+            cat >"$standalone_file" <<EOF
+version: '3.8'
+networks:
+  protegrity-network:
+    name: ${PROTEGRITY_NETWORK_NAME}
+services:
+  pattern-provider-service:
+    image: ${PROTEGRITY_PATTERN_IMAGE}
+    container_name: pattern_provider
+    networks:
+      - protegrity-network
+  context-provider-service:
+    image: ${PROTEGRITY_CONTEXT_IMAGE}
+    container_name: context_provider
+    networks:
+      - protegrity-network
+  classification-service:
+    image: ${PROTEGRITY_CLASSIFICATION_IMAGE}
+    container_name: classification_service
+    ports:
+      - "${PROTEGRITY_CLASSIFICATION_PORT}:8050"
+    depends_on:
+      - pattern-provider-service
+      - context-provider-service
+    networks:
+      - protegrity-network
+    environment:
+      - 'PROVIDERS=[{"name":"Pattern", "address":"http://pattern-provider-service:8051"}, {"name":"Context", "address":"http://context-provider-service:8052"}]'
+EOF
+            ;;
+        semantic-guardrail)
+            cat >"$standalone_file" <<EOF
+version: '3.8'
+networks:
+  protegrity-network:
+    name: ${PROTEGRITY_NETWORK_NAME}
+services:
+  semantic-guardrail-service:
+    image: ${PROTEGRITY_SEMANTIC_GUARDRAIL_IMAGE}
+    container_name: semantic_guardrail
+    ports:
+      - "${PROTEGRITY_SGR_PORT}:8001"
+    networks:
+      - protegrity-network
+    environment:
+      - LOG_LEVEL=WARNING
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+EOF
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 compose_up() {
@@ -109,7 +201,37 @@ compose_up() {
         error "No docker-compose file in ${dir}"
         return 1
     fi
+
     prepare_protegrity_compose_env
+
+    if [[ "${COMPOSE[0]}" == "docker-compose" ]]; then
+        local standalone_file
+        standalone_file="$(mktemp "${TMPDIR:-/tmp}/protegrity-compose-standalone.XXXXXX.yml")"
+        if ! write_standalone_compose_v1 "$dir" "$standalone_file"; then
+            rm -f "$standalone_file"
+            local compose_file="docker-compose.yml"
+            [[ -f "${dir}/docker-compose.yml" ]] || compose_file="docker-compose.yaml"
+            warn "Falling back to upstream compose file for ${dir}"
+            if ! (cd "$dir" && "${COMPOSE[@]}" -f "$compose_file" up -d); then
+                return 1
+            fi
+            return 0
+        fi
+
+        if ! (cd "$dir" && "${COMPOSE[@]}" -f "$standalone_file" up -d); then
+            warn "Compose up failed — resolved images:"
+            echo "       pattern:        ${PROTEGRITY_PATTERN_IMAGE}"
+            echo "       context:        ${PROTEGRITY_CONTEXT_IMAGE}"
+            echo "       classification: ${PROTEGRITY_CLASSIFICATION_IMAGE}"
+            echo "       guardrail:      ${PROTEGRITY_SEMANTIC_GUARDRAIL_IMAGE}"
+            (cd "$dir" && "${COMPOSE[@]}" -f "$standalone_file" config) || true
+            rm -f "$standalone_file"
+            return 1
+        fi
+        rm -f "$standalone_file"
+        return 0
+    fi
+
     (cd "$dir" && "${COMPOSE[@]}" up -d)
 }
 
