@@ -81,6 +81,26 @@ resolve_compose() {
 check_docker_compose() {
     resolve_compose || return 1
     info "Docker Compose is available (${COMPOSE[*]})"
+    if [[ "${COMPOSE[0]}" == "docker-compose" ]]; then
+        warn "Using legacy docker-compose v1 — image env vars will be pre-resolved automatically"
+    fi
+}
+
+prepare_protegrity_compose_env() {
+    # docker-compose v1 cannot expand nested ${VAR:-${NESTED:-default}} in compose
+    # files; pre-resolve image refs in bash so compose sees plain values.
+    local registry="${REGISTRY:-ghcr.io/protegrity-ai-developer-edition}"
+    [[ -n "$registry" ]] || registry="ghcr.io/protegrity-ai-developer-edition"
+
+    export DOCKER_NETWORK_NAME="${DOCKER_NETWORK_NAME:-protegrity-network}"
+    export REGISTRY="$registry"
+    export CLASSIFICATION_PORT="${CLASSIFICATION_PORT:-8580}"
+    export SGR_PORT="${SGR_PORT:-8581}"
+
+    export DOCKER_PATTERN_IMAGE="${DOCKER_PATTERN_IMAGE:-${registry}/pattern-provider:${PATTERN_TAG:-2.0.0.320.59776828}}"
+    export DOCKER_CONTEXT_IMAGE="${DOCKER_CONTEXT_IMAGE:-${registry}/context-provider:${CONTEXT_TAG:-2.0.0.242.5041932c}}"
+    export DOCKER_CLASSIFICATION_IMAGE="${DOCKER_CLASSIFICATION_IMAGE:-${registry}/classification-service:${CLASSIFICATION_TAG:-2.0.0.374.8047721c}}"
+    export DOCKER_SEMANTIC_GUARDRAIL_IMAGE="${DOCKER_SEMANTIC_GUARDRAIL_IMAGE:-${registry}/semantic-guardrail:${SEMANTIC_GUARDRAIL_TAG:-1.1.1-36-1b3de114}}"
 }
 
 compose_up() {
@@ -89,6 +109,7 @@ compose_up() {
         error "No docker-compose file in ${dir}"
         return 1
     fi
+    prepare_protegrity_compose_env
     (cd "$dir" && "${COMPOSE[@]}" up -d)
 }
 
@@ -177,6 +198,11 @@ install_docker() {
         return 1
     fi
 
+    if ! resolve_compose && command -v apt-get &>/dev/null; then
+        echo "Installing Docker Compose plugin (v2)…"
+        sudo apt-get update -qq 2>/dev/null || true
+        sudo apt-get install -y docker-compose-plugin 2>/dev/null || true
+    fi
     if resolve_compose; then
         info "Docker Compose installed: $(docker compose version 2>/dev/null || docker-compose --version)"
     else
